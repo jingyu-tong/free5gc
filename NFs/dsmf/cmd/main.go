@@ -31,8 +31,8 @@ func main() {
 	}()
 
 	app := cli.NewApp()
-	app.Name = "smf"
-	app.Usage = "5G Session Management Function (SMF)"
+	app.Name = "dsmf"
+	app.Usage = "6G Data Service Management Function (DSMF)"
 	app.Action = action
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
