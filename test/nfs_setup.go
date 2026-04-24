@@ -17,6 +17,12 @@ import (
 	bsf_service "github.com/free5gc/bsf/pkg/service"
 	chf_factory "github.com/free5gc/chf/pkg/factory"
 	chf_service "github.com/free5gc/chf/pkg/service"
+	dpf_factory "github.com/free5gc/dpf/pkg/factory"
+	dpf_service "github.com/free5gc/dpf/pkg/service"
+	dsf_factory "github.com/free5gc/dsf/pkg/factory"
+	dsf_service "github.com/free5gc/dsf/pkg/service"
+	dsmf_factory "github.com/free5gc/dsmf/pkg/factory"
+	dsmf_service "github.com/free5gc/dsmf/pkg/service"
 	nrf_factory "github.com/free5gc/nrf/pkg/factory"
 	nrf_service "github.com/free5gc/nrf/pkg/service"
 	nssf_factory "github.com/free5gc/nssf/pkg/factory"
@@ -52,6 +58,9 @@ type StartNFsConfig struct {
 	Ausf bool `yaml:"ausf,omitempty" default:"false"`
 	Chf  bool `yaml:"chf,omitempty" default:"false"`
 	Bsf  bool `yaml:"bsf,omitempty" default:"false"`
+	Dsmf bool `yaml:"dsmf,omitempty" default:"false"`
+	Dpf  bool `yaml:"dpf,omitempty" default:"false"`
+	Dsf  bool `yaml:"dsf,omitempty" default:"false"`
 
 	OAuth  bool   `yaml:"oauth,omitempty" default:"false"`
 	TestId TestId `yaml:"testId,omitempty"`
@@ -94,6 +103,15 @@ func CreateNFs(cfg StartNFsConfig) []app.NFstruct {
 	}
 	if cfg.Bsf {
 		nfs = append(nfs, NewBsfStruct(NfCtx))
+	}
+	if cfg.Dsmf {
+		nfs = append(nfs, NewDsmfStruct(NfCtx))
+	}
+	if cfg.Dpf {
+		nfs = append(nfs, NewDpfStruct(NfCtx))
+	}
+	if cfg.Dsf {
+		nfs = append(nfs, NewDsfStruct(NfCtx))
 	}
 	return nfs
 }
@@ -215,6 +233,57 @@ func NewNssfStruct(ctx context.Context) app.NFstruct {
 		Nf:     nssfApp,
 		Ctx:    &nssf_ctx,
 		Cancel: &nssf_cancel,
+	}
+}
+
+func NewDsmfStruct(ctx context.Context) app.NFstruct {
+	if err := dsmfConfig(); err != nil {
+		fmt.Printf("DSMF Config failed: %v\n", err)
+	}
+	dsmfCtx, dsmfCancel := context.WithCancel(ctx)
+	dsmfApp, errApp := dsmf_service.NewApp(dsmfCtx, dsmf_factory.DsmfConfig)
+	if errApp != nil {
+		fmt.Printf("DSMF NewApp failed: %v\n", errApp)
+	}
+
+	return app.NFstruct{
+		Nf:     dsmfApp,
+		Ctx:    &dsmfCtx,
+		Cancel: &dsmfCancel,
+	}
+}
+
+func NewDpfStruct(ctx context.Context) app.NFstruct {
+	if err := dpfConfig(); err != nil {
+		fmt.Printf("DPF Config failed: %v\n", err)
+	}
+	dpfCtx, dpfCancel := context.WithCancel(ctx)
+	dpfApp, errApp := dpf_service.NewApp(dpfCtx, dpf_factory.DpfConfig)
+	if errApp != nil {
+		fmt.Printf("DPF NewApp failed: %v\n", errApp)
+	}
+
+	return app.NFstruct{
+		Nf:     dpfApp,
+		Ctx:    &dpfCtx,
+		Cancel: &dpfCancel,
+	}
+}
+
+func NewDsfStruct(ctx context.Context) app.NFstruct {
+	if err := dsfConfig(); err != nil {
+		fmt.Printf("DSF Config failed: %v\n", err)
+	}
+	dsfCtx, dsfCancel := context.WithCancel(ctx)
+	dsfApp, errApp := dsf_service.NewApp(dsfCtx, dsf_factory.DsfConfig)
+	if errApp != nil {
+		fmt.Printf("DSF NewApp failed: %v\n", errApp)
+	}
+
+	return app.NFstruct{
+		Nf:     dsfApp,
+		Ctx:    &dsfCtx,
+		Cancel: &dsfCancel,
 	}
 }
 
@@ -1515,6 +1584,104 @@ func chfConfig() error {
 
 	if _, err := chf_factory.ChfConfig.Validate(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func dsmfConfig() error {
+	dsmf_factory.DsmfConfig = &dsmf_factory.Config{
+		Info: dsmf_factory.Info{
+			Version:     "1.0.0",
+			Description: "DSMF initial test configuration",
+		},
+		Configuration: dsmf_factory.Configuration{
+			DsmfName: "DSMF",
+			Sbi: dsmf_factory.Sbi{
+				Scheme:       "http",
+				RegisterIPv4: "127.0.0.31",
+				BindingIPv4:  "127.0.0.31",
+				Port:         8010,
+			},
+			Grpc: dsmf_factory.Grpc{
+				BindingIPv4: "127.0.0.31",
+				Port:        50070,
+			},
+			DpfEndpoints: []dsmf_factory.EndpointRef{{
+				ID:      "dpf-1",
+				Address: "127.0.0.32:50071",
+			}},
+			DsfEndpoints: []dsmf_factory.EndpointRef{{
+				ID:      "dsf-1",
+				Address: "127.0.0.33:50072",
+			}},
+			DefaultProtocols: dsmf_factory.ProtocolConfig{
+				Transport: "HTTP2",
+				Payload:   "JSON",
+			},
+			Task: dsmf_factory.TaskConfig{
+				TimeoutSeconds: 15,
+				Storage: dsmf_factory.StorageConfig{
+					BackendType:       "filesystem",
+					ObjectPrefix:      "test-results",
+					RetentionDays:     1,
+					OverwriteIfExists: true,
+				},
+			},
+		},
+		Logger: dsmf_factory.Logger{
+			Enable:       true,
+			Level:        "info",
+			ReportCaller: false,
+		},
+	}
+	return nil
+}
+
+func dpfConfig() error {
+	dpf_factory.DpfConfig = &dpf_factory.Config{
+		Info: dpf_factory.Info{
+			Version:     "1.0.0",
+			Description: "DPF initial test configuration",
+		},
+		Configuration: dpf_factory.Configuration{
+			DpfID: "dpf-1",
+			Grpc: dpf_factory.Grpc{
+				BindingIPv4: "127.0.0.32",
+				Port:        50071,
+			},
+			ChunkSize:             4096,
+			HTTPSourceTimeoutSecs: 5,
+		},
+		Logger: dpf_factory.Logger{
+			Enable:       true,
+			Level:        "info",
+			ReportCaller: false,
+		},
+	}
+	return nil
+}
+
+func dsfConfig() error {
+	dsf_factory.DsfConfig = &dsf_factory.Config{
+		Info: dsf_factory.Info{
+			Version:     "1.0.0",
+			Description: "DSF initial test configuration",
+		},
+		Configuration: dsf_factory.Configuration{
+			DsfID: "dsf-1",
+			Grpc: dsf_factory.Grpc{
+				BindingIPv4: "127.0.0.33",
+				Port:        50072,
+			},
+			Storage: dsf_factory.Storage{
+				RootDir: "../test/output/dsf",
+			},
+		},
+		Logger: dsf_factory.Logger{
+			Enable:       true,
+			Level:        "info",
+			ReportCaller: false,
+		},
 	}
 	return nil
 }

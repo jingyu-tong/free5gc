@@ -41,3 +41,6 @@ cert/*_*.pem
 
 # ./test.sh All
 testing_output/
+
+# remote protocol smoke test artifacts
+remote-test-results/

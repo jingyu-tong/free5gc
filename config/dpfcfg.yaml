@@ -1,0 +1,16 @@
+info:
+  version: 1.0.0
+  description: DPF initial local configuration
+
+configuration:
+  dpfId: dpf-1
+  grpc:
+    bindingIPv4: 127.0.0.32
+    port: 50071
+  chunkSize: 32768
+  httpSourceTimeoutSeconds: 15
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false

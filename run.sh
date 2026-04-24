@@ -7,6 +7,7 @@ PCAP_MODE=0
 N3IWF_ENABLE=0
 TNGF_ENABLE=0
 BSF_ENABLE=0
+AMF_CONFIG_PATH="${AMF_CONFIG_PATH:-./config/amfcfg.yaml}"
 
 PID_LIST=()
 echo $$ > run.pid
@@ -141,7 +142,7 @@ mongosh "$DB_NAME" --eval "$MONGO_SCRIPT"
 
 sleep 0.1
 
-NF_LIST="nrf amf smf udr pcf udm nssf ausf chf nef"
+NF_LIST="nrf amf smf udr pcf udm nssf ausf chf nef dsmf dpf dsf"
 
 # Add BSF to the list only if enabled
 if [ $BSF_ENABLE -ne 0 ]; then
@@ -154,7 +155,11 @@ fi
 export GIN_MODE=release
 
 for NF in ${NF_LIST}; do
-    ./bin/${NF} -c ./config/${NF}cfg.yaml -l ${LOG_PATH}${LOG_NAME} &
+    NF_CONFIG_PATH="./config/${NF}cfg.yaml"
+    if [ "${NF}" = "amf" ]; then
+        NF_CONFIG_PATH="${AMF_CONFIG_PATH}"
+    fi
+    ./bin/${NF} -c ${NF_CONFIG_PATH} -l ${LOG_PATH}${LOG_NAME} &
     PID=$!
     PID_LIST+=($PID)
 

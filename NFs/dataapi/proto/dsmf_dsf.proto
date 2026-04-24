@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package net.framework.dsmf_dsf.v1;
+
+option go_package = "github.com/free5gc/dataapi/pkg/api";
+
+service DsfControlService {
+  rpc SubmitStorageTask(SubmitStorageTaskRequest) returns (SubmitStorageTaskResponse);
+}
+
+service DsmfStorageCallbackService {
+  rpc ReportStorageStatus(StorageStatusReport) returns (StorageStatusAck);
+}

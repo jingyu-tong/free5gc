@@ -1,0 +1,16 @@
+info:
+  version: 1.0.0
+  description: DSF initial local configuration
+
+configuration:
+  dsfId: dsf-1
+  grpc:
+    bindingIPv4: 127.0.0.33
+    port: 50072
+  storage:
+    rootDir: ./data/dsf
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false

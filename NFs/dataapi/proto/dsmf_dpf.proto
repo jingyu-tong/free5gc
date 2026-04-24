@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package net.framework.dsmf_dpf.v1;
+
+option go_package = "github.com/free5gc/dataapi/pkg/api";
+
+service DpfControlService {
+  rpc SubmitProcessingTask(SubmitProcessingTaskRequest) returns (SubmitProcessingTaskResponse);
+}
+
+service DsmfProcessingCallbackService {
+  rpc ReportProcessingStatus(ProcessingStatusReport) returns (ProcessingStatusAck);
+}

@@ -1,18 +1,16 @@
 package app
 
 import (
-	smf_context "github.com/free5gc/smf/internal/context"
-	"github.com/free5gc/smf/pkg/factory"
+	dsmf_context "github.com/free5gc/dsmf/internal/context"
+	"github.com/free5gc/dsmf/pkg/factory"
 )
 
 type App interface {
-	SetLogEnable(enable bool)
-	SetLogLevel(level string)
-	SetReportCaller(reportCaller bool)
-
+	SetLogEnable(bool)
+	SetLogLevel(string)
+	SetReportCaller(bool)
 	Start()
 	Terminate()
-
-	Context() *smf_context.SMFContext
+	Context() *dsmf_context.Context
 	Config() *factory.Config
 }

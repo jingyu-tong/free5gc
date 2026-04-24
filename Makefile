@@ -4,7 +4,7 @@ C_BUILD_PATH = build
 ROOT_PATH = $(shell pwd)
 
 NF = $(GO_NF)
-GO_NF = amf ausf bsf nrf nssf pcf smf udm udr n3iwf upf chf tngf nef
+GO_NF = amf ausf bsf nrf nssf pcf smf udm udr n3iwf upf chf tngf nef dsmf dpf dsf
 
 WEBCONSOLE = webconsole
 
@@ -79,4 +79,3 @@ clean:
 	rm -rf $(addprefix $(GO_BIN_PATH)/, $(GO_NF))
 	rm -rf $(addprefix $(GO_SRC_PATH)/, $(addsuffix /$(C_BUILD_PATH), $(C_NF)))
 	rm -rf $(WEBCONSOLE)/$(GO_BIN_PATH)/$(WEBCONSOLE)
-

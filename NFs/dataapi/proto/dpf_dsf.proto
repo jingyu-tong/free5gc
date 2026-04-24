@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package net.framework.dpf_dsf.v1;
+
+option go_package = "github.com/free5gc/dataapi/pkg/api";
+
+service ResultTransferService {
+  rpc OpenTransfer(OpenTransferRequest) returns (OpenTransferResponse);
+  rpc PushResult(stream ResultChunk) returns (PushResultResponse);
+  rpc CloseTransfer(CloseTransferRequest) returns (CloseTransferResponse);
+}

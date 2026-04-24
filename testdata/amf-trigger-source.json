@@ -1,0 +1,7 @@
+{
+  "sensorId": "amf-ue-trigger-source",
+  "frameId": 1,
+  "timestamp": "2026-04-23T00:00:00Z",
+  "csi": [0.12, 0.18, 0.25, 0.22, 0.16, 0.11],
+  "note": "Sample source for AMF-triggered DSMF transfer tests."
+}

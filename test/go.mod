@@ -11,6 +11,10 @@ require (
 	github.com/free5gc/ausf v0.0.0
 	github.com/free5gc/bsf v0.0.0
 	github.com/free5gc/chf v1.2.1-0.20260104073217-9fbf02ffd990
+	github.com/free5gc/dataapi v0.0.0
+	github.com/free5gc/dpf v0.0.0
+	github.com/free5gc/dsf v0.0.0
+	github.com/free5gc/dsmf v0.0.0
 	github.com/free5gc/ike v1.2.0
 	github.com/free5gc/nas v1.2.2
 	github.com/free5gc/ngap v1.1.2
@@ -156,6 +160,10 @@ replace (
 	github.com/free5gc/ausf => ../NFs/ausf
 	github.com/free5gc/bsf => ../NFs/bsf
 	github.com/free5gc/chf => ../NFs/chf
+	github.com/free5gc/dataapi => ../NFs/dataapi
+	github.com/free5gc/dpf => ../NFs/dpf
+	github.com/free5gc/dsf => ../NFs/dsf
+	github.com/free5gc/dsmf => ../NFs/dsmf
 	github.com/free5gc/n3iwf => ../NFs/n3iwf
 	github.com/free5gc/nrf => ../NFs/nrf
 	github.com/free5gc/nssf => ../NFs/nssf

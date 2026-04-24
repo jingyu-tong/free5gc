@@ -83,6 +83,8 @@ type Configuration struct {
 	TeID uint32 `yaml:"teID,omitempty"`
 
 	Snssai *snssai `yaml:"snssai,omitempty"`
+
+	ExitAfterPduSessionEstablishment bool `yaml:"exitAfterPduSessionEstablishment,omitempty"`
 }
 
 var uerancfg Configuration
@@ -366,6 +368,11 @@ func ueRanEmulator() error {
 		return err
 	}
 	fmt.Printf("[UERANEM] PDU session establishment completed\n")
+
+	if uerancfg.ExitAfterPduSessionEstablishment {
+		fmt.Printf("[UERANEM] Exit after PDU session establishment\n")
+		return nil
+	}
 
 	// wait 1s
 	time.Sleep(1 * time.Second)

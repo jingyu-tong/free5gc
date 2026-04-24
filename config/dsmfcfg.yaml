@@ -1,0 +1,35 @@
+info:
+  version: 1.0.0
+  description: DSMF initial local configuration
+
+configuration:
+  dsmfName: DSMF
+  sbi:
+    scheme: http
+    registerIPv4: 127.0.0.31
+    bindingIPv4: 127.0.0.31
+    port: 8010
+  grpc:
+    bindingIPv4: 127.0.0.31
+    port: 50070
+  dpfEndpoints:
+    - id: dpf-1
+      address: 127.0.0.32:50071
+  dsfEndpoints:
+    - id: dsf-1
+      address: 127.0.0.33:50072
+  defaultProtocols:
+    transport: HTTP2
+    payload: JSON
+  task:
+    timeoutSeconds: 30
+    storage:
+      backendType: filesystem
+      objectPrefix: results
+      retentionDays: 7
+      overwriteIfExists: true
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false
