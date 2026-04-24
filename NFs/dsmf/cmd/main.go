@@ -25,7 +25,7 @@ func main() {
 
 	app := cli.NewApp()
 	app.Name = "dsmf"
-	app.Usage = "Data Service Management Function"
+	app.Usage = "6G Data Service Management Function (DSMF)"
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
 			Name:    "config",
