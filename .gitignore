@@ -44,3 +44,10 @@ testing_output/
 
 # remote protocol smoke test artifacts
 remote-test-results/
+data/
+prepared_csi_streams/
+
+# srsRAN is tracked as source; ignore generated build artifacts only.
+external/srsRAN/build/
+external/srsRAN/install/
+external/srsRAN/cmake-build-*/

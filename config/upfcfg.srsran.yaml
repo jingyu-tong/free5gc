@@ -1,0 +1,25 @@
+version: 1.0.3
+description: UPF configuration for srsRAN gNB integration
+
+pfcp:
+  addr: 127.0.0.8
+  nodeID: 127.0.0.8
+  retransTimeout: 1s
+  maxRetrans: 3
+
+gtpu:
+  forwarder: gtp5g
+  ifList:
+    - addr: 10.0.0.197
+      type: N3
+
+dnnList:
+  - dnn: internet
+    cidr: 10.60.0.0/16
+  - dnn: internet
+    cidr: 10.61.0.0/16
+
+logger:
+  enable: true
+  level: info
+  reportCaller: false

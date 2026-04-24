@@ -163,17 +163,30 @@
   - `PROTOBUF` 与 `JSON` 两种 payload 编码正确性
   - 不支持协议返回 `unsupported`
 - 延迟分布测试：
-  - 目标是比较 `payloadProtocol=JSON` 与 `payloadProtocol=PROTOBUF` 在同一远端环境下的端到端延迟分布
-  - 调用路径固定为 `客户端 -> DSMF -> DPF -> DSF -> DSMF`
-  - 每种协议需要进行多次同步调用，不再只做单次烟测
-  - 建议使用仓库脚本 `scripts/protocol_latency_benchmark.py` 执行批量测试
-  - 默认按相同输入数据、相同处理步骤、相同存储策略执行，控制变量只保留 `payloadProtocol`
+  - 当前正式测试目标切换为 `UE -> AMF -> DSMF -> DPF -> DSF -> DSMF` 的整链路延迟，而不是此前的假 JSON 文件直连 DSMF
+  - 测试输入统一来自远端 `/data/chensb-data/data-framework/free5gc/prepared_csi_streams/`
+  - 当前按 3 类顶层场景执行：
+    - `gesture` -> `sourceScenario=GESTURE_RECOGNITION_CSI`
+    - `localization` -> `sourceScenario=POSITIONING_CSI`
+    - `vehicle` -> `sourceScenario=VEHICLE_CSI`
+  - 每个场景每次只发送 1 个时刻的 CSI 包：
+    - 输入文件格式为 prepared 生成的逐行 TSV
+    - 每轮测试把 1 行 CSI 数据连同表头写成临时单包文件，再由 AMF 的 DSMF trigger 作为 `file` 数据源下发
+  - 每个场景固定执行 `30` 次，得到端到端 latency 原始样本和分布统计
+  - 本轮分布统计的主指标为：
+    - `ue_trigger_total_from_registration`
+    - `amf_to_dsmf_sync_total`
+    - `dsmf_sync_task_total`
+    - `dpf_delivery_total`
   - 每轮测试至少记录：
-    - 总请求耗时
-    - HTTP 状态码
-    - DSMF 最终任务状态
-    - 结果文件大小
-    - 是否成功落盘
+    - 场景名
+    - 输入 prepared 文件
+    - 输入行号
+    - UE 触发序号
+    - DSMF `task_id`
+    - `orchestration_id`
+    - 各阶段耗时
+    - DSMF 最终状态
   - 延迟统计结果至少输出：
     - 样本数 `N`
     - `min`
@@ -184,7 +197,8 @@
     - `p95`
     - `p99`
     - `stddev`
-  - 结果按协议分别保存为 CSV，便于后续画直方图、CDF 或箱线图
+  - 结果按场景分别保存为 CSV，便于后续画直方图、CDF 或箱线图
+  - 远端执行完成后，结果必须同步回本地 `remote-test-results/`
   - 若中途出现失败请求，需要单独记录失败次数和失败原因，不能混入成功样本的延迟统计
 - 集成与回归测试：
   - `NEF/客户端 -> DSMF -> DPF -> DSF -> DSMF` 同步成功链路
@@ -206,11 +220,54 @@
 - 远端主机名在登录后显示为：`chensb@a100-1-caizhp`
 - 后续需要真实运行验证时，优先在该远端目录执行，不在本地直接跑集成测试
 - 远端测试时保持长连接，修改后需要同步本地与远端代码，避免两边代码漂移
+- `prepared_csi_streams/` 存放用于协议、编码、分包和流式回放实验的 prepared 测试数据
+- `prepared_csi_streams/` 不通过 Git 管理；该目录内容有更新时，需要单独同步到远端 `/data/chensb-data/data-framework/free5gc/prepared_csi_streams`
 - 远端已有环境相关改动需要保留，至少包括：
   - `cert/nrf.pem`
   - `config/amfcfg.yaml`
   - `config/smfcfg.yaml`
   - `config/upfcfg.yaml`
+
+## srsRAN Integration Plan
+
+- 后续 RAN 方向选择 `srsRAN Project`，先支持无 USRP 的 ZMQ/software RF 调试，之后再切到 USRP
+- srsRAN 源码放在当前仓库的 `external/srsRAN/`
+- `external/srsRAN/` 采用 vendored source 方式管理：
+  - 不作为 Git submodule
+  - 不保留 srsRAN 自己的嵌套 `.git`
+  - srsRAN 源码修改直接由当前 free5GC 仓库记录
+- 集成配置和脚本放在：
+  - `ran/srsran/`
+  - `scripts/bootstrap_srsran_local.sh`
+  - `scripts/sync_srsran_to_remote.sh`
+  - `scripts/sync_srsran_from_remote.sh`
+  - `scripts/build_srsran_remote.sh`
+  - `scripts/run_srsran_gnb_remote.sh`
+- 本地/远端同步约定：
+  - 本地是主要编辑位置
+  - 远端是主要编译和运行位置
+  - 本地改 srsRAN 后执行 `scripts/sync_srsran_to_remote.sh`
+  - 如果临时在远端改了 srsRAN，继续本地开发前必须执行 `scripts/sync_srsran_from_remote.sh`
+  - 同一次编辑会话只选择一个同步方向，避免覆盖对方修改
+- free5GC 对接 srsRAN 时的关键配置：
+  - AMF N2 地址继续使用 `10.0.0.197`
+  - UPF N3 地址不能保持 `127.0.0.8`，需要改成 gNB 可达地址，例如 `10.0.0.197`
+  - SMF `userplaneInformation.upNodes.UPF.interfaces[N3].endpoints` 要与 UPF N3 地址一致
+- 当前已加入的配置模板：
+  - `ran/srsran/gnb_zmq.yaml`
+  - `ran/srsran/gnb_usrp.yaml`
+  - `ran/srsran/free5gc-upfcfg.srsran.patch`
+  - `ran/srsran/free5gc-smfcfg.srsran.patch`
+- 当前状态：
+  - 已由用户将 srsRAN Project 源码放入 `external/srsRAN/`
+  - 已同步到远端 `/data/chensb-data/data-framework/free5gc/external/srsRAN`
+  - 已在远端完成 ZMQ/no-USRP 构建，`gnb` 版本为 `srsRAN 5G gNB version 25.10.0 (fa995e6)`
+  - 已验证 `gnb_zmq.yaml` 可以连接 free5GC AMF，并在 AMF 日志中看到：
+    - `SCTP Accept from: 10.0.0.197:50159`
+    - `Handle NGSetupRequest`
+    - `Send NG-Setup response`
+  - 当前远端暂不安装 UHD/USRP 依赖，避免拉取 GNURadio/UHD 大依赖导致根分区空间不足
+  - 远端根分区空间很紧，USRP 构建前需要先清理或扩容 `/`
 
 ## Remote Test Record
 
@@ -218,6 +275,17 @@
 
 - 已完成本地到远端 `/data/chensb-data/data-framework/free5gc` 的代码同步
 - 已把远端生成的依赖校验文件同步回本地，当前两边以下文件保持同步：
+
+### 2026-04-24
+
+- 已补充 `prepared_csi_streams/` 的远端同步约定
+- 已为 `chensb@172.27.33.78` 配置本机 SSH 公钥登录，当前可免密连接
+- 已将本地 `prepared_csi_streams/` 同步到远端 `/data/chensb-data/data-framework/free5gc/prepared_csi_streams`
+- 后续只要重新 prepare 数据或更新该目录内容，都需要再次执行远端同步，避免本地实验数据与远端测试数据不一致
+- 已将 `external/srsRAN/` 源码、`ran/srsran/` 集成配置和 srsRAN 相关脚本同步到远端
+- 已在远端安装 ZMQ 构建最小依赖，不安装 UHD/USRP 依赖
+- 已远端构建通过 `external/srsRAN/build/apps/gnb/gnb`
+- 已完成 srsRAN gNB 到 free5GC AMF 的 N2 smoke test，AMF 收到 `NGSetupRequest` 并返回 `NG-Setup response`
   - `NFs/dataapi/go.sum`
   - `NFs/dsmf/go.sum`
   - `NFs/dpf/go.sum`
@@ -269,10 +337,12 @@
 ### Next Benchmark Target
 
 - 下一阶段正式测试目标：
-  - 在远端 `172.27.33.78` 上分别对 `JSON` 和 `PROTOBUF` 做多次同步调用
+  - 在远端 `172.27.33.78` 上使用 `prepared_csi_streams/` 进行 UE 触发整链路延迟测试
+  - 对 `gesture`、`localization`、`vehicle` 3 个场景分别执行 `30` 次
+  - 每次测试只发送 1 个时刻的 CSI 包
   - 生成按请求粒度展开的原始延迟 CSV
-  - 输出两种协议的延迟分布统计摘要
-  - 将统计结果和原始 CSV 回传本地，但保存在 `remote-test-results/` 下并保持不提交到 GitHub
+  - 输出每个场景的延迟分布统计摘要
+  - 将统计结果、原始 CSV 和关键日志回传本地，但保存在 `remote-test-results/` 下并保持不提交到 GitHub
   - 测试结果数据文件继续按日期或场景落在 `remote-test-results/<case>/...`
   - MATLAB 绘图脚本 `.m` 统一放在 `remote-test-results/` 根目录，不放在其子目录中
 

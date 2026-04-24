@@ -1,0 +1,8 @@
+--- a/config/upfcfg.yaml
++++ b/config/upfcfg.yaml
+@@
+-  ifList:
+-    - addr: 127.0.0.8
++  ifList:
++    - addr: 10.0.0.197
+       type: N3

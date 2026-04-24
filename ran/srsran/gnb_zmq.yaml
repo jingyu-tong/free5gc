@@ -1,0 +1,43 @@
+# srsRAN Project gNB template for free5GC integration without USRP.
+# This is intended for Linux remote execution. ZMQ endpoints are local to the
+# host running gNB and a compatible software UE.
+
+cu_cp:
+  amf:
+    addr: 10.0.0.197
+    port: 38412
+    bind_addr: 10.0.0.197
+    supported_tracking_areas:
+      - tac: 1
+        plmn_list:
+          - plmn: "20893"
+            tai_slice_support_list:
+              - sst: 1
+                sd: "010203"
+
+  inactivity_timer: 7200
+
+cell_cfg:
+  dl_arfcn: 368500
+  band: 3
+  channel_bandwidth_MHz: 20
+  common_scs: 15
+  plmn: "20893"
+  tac: 1
+  pci: 1
+
+ru_sdr:
+  device_driver: zmq
+  device_args: tx_port=tcp://*:2000,rx_port=tcp://127.0.0.1:2001,base_srate=23.04e6
+  srate: 23.04
+  tx_gain: 75
+  rx_gain: 75
+
+log:
+  filename: /tmp/srsran_gnb_zmq.log
+  all_level: info
+
+pcap:
+  mac_enable: false
+  ngap_enable: true
+  ngap_filename: /tmp/srsran_gnb_zmq_ngap.pcap

@@ -8,6 +8,8 @@ N3IWF_ENABLE=0
 TNGF_ENABLE=0
 BSF_ENABLE=0
 AMF_CONFIG_PATH="${AMF_CONFIG_PATH:-./config/amfcfg.yaml}"
+SMF_CONFIG_PATH="${SMF_CONFIG_PATH:-./config/smfcfg.yaml}"
+UPF_CONFIG_PATH="${UPF_CONFIG_PATH:-./config/upfcfg.yaml}"
 
 PID_LIST=()
 echo $$ > run.pid
@@ -117,7 +119,7 @@ if [ $PCAP_MODE -ne 0 ]; then
     PID_LIST+=($SUDO_TCPDUMP_PID $TCPDUMP_PID)
 fi
 
-sudo -E ./bin/upf -c ./config/upfcfg.yaml -l ${LOG_PATH}${LOG_NAME} &
+sudo -E ./bin/upf -c ${UPF_CONFIG_PATH} -l ${LOG_PATH}${LOG_NAME} &
 SUDO_UPF_PID=$!
 sleep 0.1
 UPF_PID=$(pgrep -P $SUDO_UPF_PID)
@@ -158,6 +160,8 @@ for NF in ${NF_LIST}; do
     NF_CONFIG_PATH="./config/${NF}cfg.yaml"
     if [ "${NF}" = "amf" ]; then
         NF_CONFIG_PATH="${AMF_CONFIG_PATH}"
+    elif [ "${NF}" = "smf" ]; then
+        NF_CONFIG_PATH="${SMF_CONFIG_PATH}"
     fi
     ./bin/${NF} -c ${NF_CONFIG_PATH} -l ${LOG_PATH}${LOG_NAME} &
     PID=$!
