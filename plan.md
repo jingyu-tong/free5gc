@@ -26,7 +26,12 @@
 - v1 实现的协议子集：
   - 控制面：gRPC over HTTP/2
   - 结果载荷编码：`PROTOBUF`、`JSON`
-  - `RDMA`、`QUIC`、`HTTP3` 只保留枚举，占位返回 `unsupported`
+  - 传输协议对比实验新增 `HTTP2`、`HTTP3`、`QUIC` 3 档结果数据面
+  - `HTTP2` 结果数据面继续使用现有 gRPC client streaming
+  - `HTTP3` 结果数据面使用原生 HTTP/3 POST over QUIC
+  - `QUIC` 结果数据面使用原生 QUIC bidirectional stream
+  - HTTP/3 与 QUIC 实验默认复用 DPF 到 DSF 的连接：HTTP/3 复用 `http3.Transport`，QUIC 复用同一 QUIC connection 并为每次结果传输打开新的 bidirectional stream
+  - `RDMA` 仍保留枚举，占位返回 `unsupported`
 
 ### 2. DSMF 重建
 
@@ -77,6 +82,11 @@
 - 数据源接入 v1 仅支持：
   - `file`
   - `http` / `https`
+- 新增 RAN 到 DPF 的 CSI ingress：
+  - DPF 暴露 `POST /v1/ran/csi/{packetId}` 或 `PUT /v1/ran/csi/{packetId}` 接收 RAN 侧估计出的 CSI 原文
+  - DPF 暴露 `GET /v1/ran/csi/{packetId}` 给自身处理任务按 HTTP 数据源拉取
+  - `latest` 作为保留 packet id，用于顺序单包测试：RAN 先覆盖最新 CSI，UE 再触发 AMF/DSMF 流程
+  - 该接口只模拟 RAN 估计结果进入 DPF，不表示 UE 用户面真实承载 CSI
 - 处理逻辑 v1 提供两档：
   - `BREATHING_CSI` 示例处理链路
   - 通用 `passthrough`/字段提取链路
@@ -161,9 +171,43 @@
 - 协议测试：
   - 3 组 gRPC service 的 request/response 与错误路径
   - `PROTOBUF` 与 `JSON` 两种 payload 编码正确性
-  - 不支持协议返回 `unsupported`
+  - `PROTOBUF` payload 不再使用 `structpb.Struct` 动态对象；为每类处理任务定义强类型 `.proto`：
+    - 通用字段：`ProcessingResult`
+    - 手势识别：`GestureRecognitionResult`
+    - 定位：`PositioningResult`
+    - 车联网：`VehicleResult`
+    - 呼吸 CSI：`BreathingCsiResult`
+  - DPF 在编码 Protobuf 时直接构造 generated message 并 `proto.Marshal`，JSON 路径继续输出同一语义的 JSON object，避免把 `map[string]any -> structpb -> proto.Marshal` 的动态转换开销混入 Protobuf 对比
+  - 后续 benchmark 重点比较 `dpf_process_and_encode_ms`、`dpf_result_transfer_ms` 和 `dpf_delivery_total_ms`，端到端 `ue_trigger_total_from_registration_ms` 仅作为系统级参考
+  - `HTTP2`、`HTTP3`、`QUIC` 3 种 transport profile 可以被 DSMF/DPF/DSF 端到端接受并写入结果
+  - 不支持协议如 `RDMA` 返回 `unsupported`
+- 协议延迟对比测试：
+  - 在原有 `JSON`/`PROTOBUF` payload 编码维度外，新增 `HTTP2`、`HTTP3`、`QUIC` transport profile 维度
+  - 默认矩阵为 `3 transport profiles x 2 payload protocols`：
+    - `HTTP2/JSON`
+    - `HTTP2/PROTOBUF`
+    - `HTTP3/JSON`
+    - `HTTP3/PROTOBUF`
+    - `QUIC/JSON`
+    - `QUIC/PROTOBUF`
+  - benchmark 原始 CSV 必须同时输出：
+    - `transport_protocol`
+    - `payload_protocol`
+    - `protocol`，格式为 `<transport>/<payload>`，用于兼容旧绘图脚本
+  - summary CSV/JSON 按 `<transport>/<payload>` 分组统计成功样本，不把失败请求混入延迟统计
+  - 图表脚本 `remote-test-results/plot_protocol_latency_distribution.m` 默认自动查找最新 `protocol_latency_raw.csv`，并按组合协议绘制 histogram、CDF、box plot 与 jitter samples
+- 全流程协议数据面测试：
+  - `scripts/run_remote_ue_latency_benchmark.sh` 支持 `TRANSPORT_PROTOCOLS` 与 `PAYLOAD_PROTOCOLS` 环境变量，默认执行 `HTTP2,HTTP3,QUIC x JSON,PROTOBUF`
+  - 每个协议组合都会为 AMF 生成独立 `amfcfg.yaml`，设置 `dsmfTrigger.transportProtocol` 与 `dsmfTrigger.payloadProtocol`
+  - 每轮仍保持完整路径：prepared CSI 单包先按当前 transport 写入 `DPF /v1/ran/csi/latest`，UE emulator 触发 AMF registration，AMF 调 DSMF，DPF 从 RAN ingress 拉取 CSI，最后按协议数据面投递到 DSF
+  - RAN -> DPF ingress 新增 3 种写入数据面：
+    - `HTTP2`：h2c POST，默认 `127.0.0.32:8071`
+    - `HTTP3`：HTTP/3 POST over QUIC，默认 `127.0.0.32:8072`
+    - `QUIC`：原生 QUIC bidirectional stream，默认 `127.0.0.32:8073`
+  - 输出目录结构为 `<result-tag>/<scenario>/<transport>-<payload>/results/`
+  - 统计脚本 `scripts/ue_trigger_latency_distribution.py` 会识别 `DPF_PUSH_RESULT_COMPLETE`、`DPF_HTTP3_RESULT_COMPLETE`、`DPF_QUIC_RESULT_COMPLETE`，统一输出 `dpf_result_transfer_ms`
 - 延迟分布测试：
-  - 当前正式测试目标切换为 `UE -> AMF -> DSMF -> DPF -> DSF -> DSMF` 的整链路延迟，而不是此前的假 JSON 文件直连 DSMF
+  - 当前正式测试目标切换为 `UE -> AMF -> DSMF -> DPF -> DSF -> DSMF` 的整链路延迟，同时数据输入改为 `RAN -> DPF` ingress，而不是此前的本地 file 数据源
   - 测试输入统一来自远端 `/data/chensb-data/data-framework/free5gc/prepared_csi_streams/`
   - 当前按 3 类顶层场景执行：
     - `gesture` -> `sourceScenario=GESTURE_RECOGNITION_CSI`
@@ -171,7 +215,10 @@
     - `vehicle` -> `sourceScenario=VEHICLE_CSI`
   - 每个场景每次只发送 1 个时刻的 CSI 包：
     - 输入文件格式为 prepared 生成的逐行 TSV
-    - 每轮测试把 1 行 CSI 数据连同表头写成临时单包文件，再由 AMF 的 DSMF trigger 作为 `file` 数据源下发
+    - 每轮测试把 1 行 CSI 数据连同表头写成临时单包文本
+    - 测试脚本先把该单包文本通过 DPF `POST /v1/ran/csi/latest` 写入 RAN ingress
+    - UE 随后向 AMF 发送控制面触发消息，AMF 只触发 DSMF，不直接携带 CSI 数据
+    - DSMF 下发给 DPF 的数据源为 DPF RAN ingress HTTP endpoint，DPF 再按 HTTP 拉取对应 CSI 包
   - 每个场景固定执行 `30` 次，得到端到端 latency 原始样本和分布统计
   - 本轮分布统计的主指标为：
     - `ue_trigger_total_from_registration`

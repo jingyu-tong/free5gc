@@ -9,6 +9,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	dsf_context "github.com/free5gc/dsf/internal/context"
+	"github.com/free5gc/dsf/internal/dataplane"
 	"github.com/free5gc/dsf/internal/logger"
 	"github.com/free5gc/dsf/internal/processor"
 	"github.com/free5gc/dsf/internal/rpc"
@@ -23,6 +24,7 @@ type DsfApp struct {
 	dsfCtx    *dsf_context.Context
 	processor *processor.Processor
 	rpcServer *rpc.Server
+	dataPlane *dataplane.Server
 	wg        sync.WaitGroup
 }
 
@@ -42,12 +44,16 @@ func NewApp(parent context.Context, cfg *factory.Config) (*DsfApp, error) {
 		dsfCtx:    dsfCtx,
 		processor: proc,
 		rpcServer: rpc.New(dsfCtx.GRPCAddr, proc),
+		dataPlane: dataplane.New(dsfCtx.HTTP3Addr, dsfCtx.QUICAddr, dsfCtx.DataPlaneCert, dsfCtx.DataPlaneKey, proc),
 	}, nil
 }
 
 func (a *DsfApp) Start() {
 	if err := a.rpcServer.Run(a.ctx, &a.wg); err != nil {
 		logger.MainLog.Fatalf("failed to start DSF gRPC server: %v", err)
+	}
+	if err := a.dataPlane.Run(a.ctx, &a.wg); err != nil {
+		logger.MainLog.Fatalf("failed to start DSF data plane: %v", err)
 	}
 	<-a.ctx.Done()
 	a.wg.Wait()
@@ -74,6 +80,7 @@ func (a *DsfApp) SetReportCaller(reportCaller bool) {
 
 func (a *DsfApp) Terminate() {
 	a.cancel()
+	a.dataPlane.Stop()
 	a.rpcServer.Stop()
 }
 

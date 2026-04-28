@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,30 +23,30 @@ import (
 )
 
 type Request struct {
-	RequestID         string              `json:"requestId"`
-	ResultMode        string              `json:"resultMode"`
-	TransportProtocol api.ProtocolType    `json:"transportProtocol"`
-	PayloadProtocol   api.ProtocolType    `json:"payloadProtocol"`
-	DataSource        api.DataSourceSpec  `json:"dataSource"`
-	ProcessingSteps   []api.ProcessingStep `json:"processingSteps"`
-	OutputSchema      string              `json:"outputSchema"`
-	TaskTimeoutSeconds uint32             `json:"taskTimeoutSeconds"`
-	Labels            map[string]string   `json:"labels"`
+	RequestID          string               `json:"requestId"`
+	ResultMode         string               `json:"resultMode"`
+	TransportProtocol  api.ProtocolType     `json:"transportProtocol"`
+	PayloadProtocol    api.ProtocolType     `json:"payloadProtocol"`
+	DataSource         api.DataSourceSpec   `json:"dataSource"`
+	ProcessingSteps    []api.ProcessingStep `json:"processingSteps"`
+	OutputSchema       string               `json:"outputSchema"`
+	TaskTimeoutSeconds uint32               `json:"taskTimeoutSeconds"`
+	Labels             map[string]string    `json:"labels"`
 }
 
 type TaskView struct {
-	TaskID           string               `json:"taskId"`
-	RequestID        string               `json:"requestId"`
-	OrchestrationID  string               `json:"orchestrationId"`
-	ProcessingTaskID string               `json:"processingTaskId"`
-	StorageTaskID    string               `json:"storageTaskId"`
-	State            string               `json:"state"`
-	SyncOrAsync      string               `json:"syncOrAsync"`
-	ResultURI        string               `json:"resultUri,omitempty"`
-	Error            string               `json:"error,omitempty"`
-	ProcessingState  api.ProcessingState  `json:"processingState,omitempty"`
-	StorageState     api.StorageState     `json:"storageState,omitempty"`
-	UpdatedAt        time.Time            `json:"updatedAt"`
+	TaskID           string              `json:"taskId"`
+	RequestID        string              `json:"requestId"`
+	OrchestrationID  string              `json:"orchestrationId"`
+	ProcessingTaskID string              `json:"processingTaskId"`
+	StorageTaskID    string              `json:"storageTaskId"`
+	State            string              `json:"state"`
+	SyncOrAsync      string              `json:"syncOrAsync"`
+	ResultURI        string              `json:"resultUri,omitempty"`
+	Error            string              `json:"error,omitempty"`
+	ProcessingState  api.ProcessingState `json:"processingState,omitempty"`
+	StorageState     api.StorageState    `json:"storageState,omitempty"`
+	UpdatedAt        time.Time           `json:"updatedAt"`
 }
 
 type taskRecord struct {
@@ -82,7 +83,7 @@ func (p *Processor) CreateTask(req Request) (*TaskView, int, error) {
 	if payload == "" {
 		payload = api.ProtocolType(strings.ToUpper(p.cfg.Configuration.DefaultProtocols.Payload))
 	}
-	if transport != api.ProtocolTypeHTTP2 {
+	if !isSupportedTransportProfile(transport) {
 		return nil, http.StatusBadRequest, fmt.Errorf("unsupported transport protocol %q", transport)
 	}
 	if payload != api.ProtocolTypeJSON && payload != api.ProtocolTypeProtobuf {
@@ -121,13 +122,14 @@ func (p *Processor) CreateTask(req Request) (*TaskView, int, error) {
 	}
 
 	log := logger.ProcLog.WithFields(map[string]any{
-		"task_id":           taskID,
-		"request_id":        req.RequestID,
-		"orchestration_id":  orchestrationID,
+		"task_id":            taskID,
+		"request_id":         req.RequestID,
+		"orchestration_id":   orchestrationID,
 		"processing_task_id": processingTaskID,
-		"storage_task_id":   storageTaskID,
-		"result_mode":       req.ResultMode,
-		"payload_protocol":  payload,
+		"storage_task_id":    storageTaskID,
+		"result_mode":        req.ResultMode,
+		"transport_protocol": transport,
+		"payload_protocol":   payload,
 	})
 	log.Infof("DSMF_CREATE_TASK_BEGIN")
 
@@ -143,14 +145,18 @@ func (p *Processor) CreateTask(req Request) (*TaskView, int, error) {
 	if err != nil {
 		return nil, http.StatusBadGateway, err
 	}
+	dsfDataEndpoint, err := dsfDataEndpointForTransport(dsfRef, transport)
+	if err != nil {
+		return nil, http.StatusBadGateway, err
+	}
 	callbackEndpoint, err := parseNetEndpoint(p.ctx.GRPCAddr)
 	if err != nil {
 		return nil, http.StatusInternalServerError, err
 	}
 
 	callback := api.CallbackBinding{
-		DsmfCallbackEndpoint: callbackEndpoint,
-		CallbackRequestID:    taskID,
+		DsmfCallbackEndpoint:   callbackEndpoint,
+		CallbackRequestID:      taskID,
 		CallbackTimeoutSeconds: req.TaskTimeoutSeconds,
 	}
 
@@ -199,14 +205,14 @@ func (p *Processor) CreateTask(req Request) (*TaskView, int, error) {
 		Delivery: api.DeliveryBinding{
 			DsfID:              dsfRef.ID,
 			DsfControlEndpoint: dsfEndpoint,
-			DsfDataEndpoint:    dsfEndpoint,
+			DsfDataEndpoint:    dsfDataEndpoint,
 			TransportProtocol:  transport,
 			PayloadProtocol:    payload,
 			ChannelID:          orchestrationID,
 		},
-		Callback:          callback,
+		Callback:           callback,
 		TaskTimeoutSeconds: req.TaskTimeoutSeconds,
-		Labels:            labels,
+		Labels:             labels,
 	}
 
 	log.Infof("DSMF_SUBMIT_PROCESSING_TASK_BEGIN")
@@ -232,7 +238,7 @@ func (p *Processor) CreateTask(req Request) (*TaskView, int, error) {
 	view := p.GetTask(taskID)
 	if view.Error != "" {
 		log.WithField("error", view.Error).Warnf("DSMF_CREATE_TASK_FAILED")
-		return view, http.StatusBadGateway, fmt.Errorf(view.Error)
+		return view, http.StatusBadGateway, errors.New(view.Error)
 	}
 	log.WithField("result_uri", view.ResultURI).Infof("DSMF_CREATE_TASK_COMPLETE")
 	return view, http.StatusOK, nil
@@ -261,17 +267,19 @@ func (p *Processor) ReportProcessingStatus(_ context.Context, report *api.Proces
 		return &api.ProcessingStatusAck{Accepted: false, Message: "task not found"}, nil
 	}
 
-	record.view.ProcessingState = report.State
+	if shouldUpdateProcessingState(record.view.ProcessingState, report.State) {
+		record.view.ProcessingState = report.State
+	}
 	record.view.UpdatedAt = time.Now().UTC()
 	if report.ErrorMessage != "" {
 		record.view.Error = report.ErrorMessage
 	}
 	logger.ProcLog.WithFields(map[string]any{
-		"task_id":           taskID,
-		"processing_task_id": report.TaskID,
-		"orchestration_id":  report.OrchestrationID,
-		"state":             report.State,
-		"detail":            report.Detail,
+		"task_id":             taskID,
+		"processing_task_id":  report.TaskID,
+		"orchestration_id":    report.OrchestrationID,
+		"state":               report.State,
+		"detail":              report.Detail,
 		"transfer_session_id": report.TransferSessionID,
 	}).Infof("DSMF_REPORT_PROCESSING_STATUS")
 	p.refreshTaskState(record)
@@ -290,7 +298,9 @@ func (p *Processor) ReportStorageStatus(_ context.Context, report *api.StorageSt
 		return &api.StorageStatusAck{Accepted: false, Message: "task not found"}, nil
 	}
 
-	record.view.StorageState = report.State
+	if shouldUpdateStorageState(record.view.StorageState, report.State) {
+		record.view.StorageState = report.State
+	}
 	record.view.UpdatedAt = time.Now().UTC()
 	if report.ResultLocation.ResultURI != "" {
 		record.view.ResultURI = report.ResultLocation.ResultURI
@@ -387,12 +397,44 @@ func parseNetEndpoint(address string) (api.Endpoint, error) {
 	}, nil
 }
 
+func dsfDataEndpointForTransport(ref factory.EndpointRef, transport api.ProtocolType) (api.Endpoint, error) {
+	address := ref.Address
+	scheme := "grpc"
+	switch transport {
+	case api.ProtocolTypeHTTP3:
+		scheme = "https"
+		if ref.HTTP3Address != "" {
+			address = ref.HTTP3Address
+		}
+	case api.ProtocolTypeQUIC:
+		scheme = "quic"
+		if ref.QUICAddress != "" {
+			address = ref.QUICAddress
+		}
+	}
+	endpoint, err := parseNetEndpoint(address)
+	if err != nil {
+		return api.Endpoint{}, err
+	}
+	endpoint.Scheme = scheme
+	return endpoint, nil
+}
+
 func contentType(payload api.ProtocolType) string {
 	switch payload {
 	case api.ProtocolTypeProtobuf:
 		return "application/protobuf"
 	default:
 		return "application/json"
+	}
+}
+
+func isSupportedTransportProfile(protocol api.ProtocolType) bool {
+	switch protocol {
+	case api.ProtocolTypeHTTP2, api.ProtocolTypeHTTP3, api.ProtocolTypeQUIC:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -419,5 +461,51 @@ func (p *Processor) refreshTaskState(record *taskRecord) {
 		record.view.State = string(record.view.ProcessingState)
 	default:
 		record.view.State = "ACCEPTED"
+	}
+}
+
+func shouldUpdateProcessingState(current, next api.ProcessingState) bool {
+	return processingStateRank(next) >= processingStateRank(current)
+}
+
+func processingStateRank(state api.ProcessingState) int {
+	switch state {
+	case api.ProcessingStateAccepted:
+		return 1
+	case api.ProcessingStateReceivingSource:
+		return 2
+	case api.ProcessingStatePreprocessing:
+		return 3
+	case api.ProcessingStateProcessing:
+		return 4
+	case api.ProcessingStateDelivering:
+		return 5
+	case api.ProcessingStateCompleted:
+		return 6
+	case api.ProcessingStateFailed:
+		return 7
+	default:
+		return 0
+	}
+}
+
+func shouldUpdateStorageState(current, next api.StorageState) bool {
+	return storageStateRank(next) >= storageStateRank(current)
+}
+
+func storageStateRank(state api.StorageState) int {
+	switch state {
+	case api.StorageStateAccepted:
+		return 1
+	case api.StorageStateReadyToReceive:
+		return 2
+	case api.StorageStateReceiving:
+		return 3
+	case api.StorageStateStored:
+		return 4
+	case api.StorageStateFailed:
+		return 5
+	default:
+		return 0
 	}
 }

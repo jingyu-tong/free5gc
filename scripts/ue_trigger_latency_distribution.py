@@ -105,6 +105,15 @@ def index_last_by(events: list[Event], marker: str, key: str, value: str) -> int
     raise RuntimeError(f"missing marker {marker} with {key}={value}")
 
 
+def index_first_by_any_marker(events: list[Event], markers: list[str], key: str, value: str, start_idx: int = 0) -> int:
+    wanted = set(markers)
+    for idx in range(start_idx, len(events)):
+        event = events[idx]
+        if event.marker in wanted and event.fields.get(key) == value:
+            return idx
+    raise RuntimeError(f"missing markers {markers} with {key}={value}")
+
+
 def build_records(events: list[Event]) -> list[dict[str, object]]:
     dispatch_indices = [idx for idx, event in enumerate(events) if event.marker == "Dispatch DSMF trigger"]
     records: list[dict[str, object]] = []
@@ -150,8 +159,16 @@ def build_records(events: list[Event]) -> list[dict[str, object]]:
         dpf_deliver_begin = events[index_first_by(events, "DPF_DELIVER_BEGIN", "orchestration_id", orch_id, dispatch_idx)]
         transfer_session_id = dpf_deliver_begin.fields["transfer_session_id"]
         dpf_open = events[index_first_by(events, "DPF_OPEN_TRANSFER_ACCEPTED", "transfer_session_id", transfer_session_id, dispatch_idx)]
-        dpf_push = events[index_first_by(events, "DPF_PUSH_RESULT_COMPLETE", "transfer_session_id", transfer_session_id, dispatch_idx)]
-        dpf_close = events[index_first_by(events, "DPF_CLOSE_TRANSFER_COMPLETE", "transfer_session_id", transfer_session_id, dispatch_idx)]
+        dpf_result_transfer = events[index_first_by_any_marker(
+            events,
+            ["DPF_PUSH_RESULT_COMPLETE", "DPF_HTTP3_RESULT_COMPLETE", "DPF_QUIC_RESULT_COMPLETE"],
+            "transfer_session_id",
+            transfer_session_id,
+            dispatch_idx,
+        )]
+        dpf_close = None
+        if dpf_result_transfer.marker == "DPF_PUSH_RESULT_COMPLETE":
+            dpf_close = events[index_first_by(events, "DPF_CLOSE_TRANSFER_COMPLETE", "transfer_session_id", transfer_session_id, dispatch_idx)]
         dpf_deliver_done = events[index_first_by(events, "DPF_DELIVER_COMPLETE", "transfer_session_id", transfer_session_id, dispatch_idx)]
 
         dsf_submit = events[index_first_by(events, "DSF_SUBMIT_STORAGE_TASK", "orchestration_id", orch_id, dispatch_idx)]
@@ -174,8 +191,9 @@ def build_records(events: list[Event]) -> list[dict[str, object]]:
                 "dpf_process_and_encode_ms": millis(dpf_source.ts, dpf_result.ts),
                 "dpf_open_transfer_rpc_ms": millis(dpf_deliver_begin.ts, dpf_open.ts),
                 "dsf_open_transfer_accept_ms": millis(dpf_deliver_begin.ts, dsf_open.ts),
-                "dpf_push_result_stream_ms": millis(dpf_open.ts, dpf_push.ts),
-                "dpf_close_transfer_rpc_ms": millis(dpf_push.ts, dpf_close.ts),
+                "dpf_result_transfer_ms": millis(dpf_open.ts, dpf_result_transfer.ts),
+                "dpf_result_transfer_marker": dpf_result_transfer.marker,
+                "dpf_close_transfer_rpc_ms": millis(dpf_result_transfer.ts, dpf_close.ts) if dpf_close else 0.0,
                 "dsf_store_result_ms": millis(dsf_open.ts, dsf_close.ts),
                 "dpf_delivery_total_ms": millis(dpf_deliver_begin.ts, dpf_deliver_done.ts),
                 "dsmf_wait_processing_callback_ms": millis(dsmf_proc_done.ts, dsmf_proc_report.ts),
@@ -229,6 +247,8 @@ def main() -> None:
         "DPF_DELIVER_BEGIN",
         "DPF_OPEN_TRANSFER_ACCEPTED",
         "DPF_PUSH_RESULT_COMPLETE",
+        "DPF_HTTP3_RESULT_COMPLETE",
+        "DPF_QUIC_RESULT_COMPLETE",
         "DPF_CLOSE_TRANSFER_COMPLETE",
         "DPF_DELIVER_COMPLETE",
     ]
@@ -257,29 +277,37 @@ def main() -> None:
         "dpf_delivery_total_ms",
     ]
     summary_rows: list[dict[str, object]] = []
-    scenario_groups = sorted({row["scenario"] for row in merged_rows})
-    for scenario in scenario_groups:
-        scenario_rows = [row for row in merged_rows if row["scenario"] == scenario]
+    group_keys = ["scenario"]
+    if merged_rows and "protocol" in merged_rows[0]:
+        group_keys = ["scenario", "protocol", "transport_protocol", "payload_protocol"]
+    if merged_rows and "packet_window_size" in merged_rows[0]:
+        group_keys.append("packet_window_size")
+    if merged_rows and "loss_percent" in merged_rows[0]:
+        group_keys.append("loss_percent")
+    if merged_rows and "netem_scope" in merged_rows[0]:
+        group_keys.append("netem_scope")
+    groups = sorted({tuple(row[key] for key in group_keys) for row in merged_rows})
+    for group in groups:
+        scenario_rows = [row for row in merged_rows if tuple(row[key] for key in group_keys) == group]
         for metric in total_metric_names:
             values = [float(row[metric]) for row in scenario_rows]
-            summary_rows.append(
-                {
-                    "scenario": scenario,
-                    "metric": metric,
-                    "samples": len(values),
-                    "min_ms": f"{min(values):.3f}",
-                    "max_ms": f"{max(values):.3f}",
-                    "avg_ms": f"{statistics.mean(values):.3f}",
-                    "p50_ms": f"{percentile(values, 0.50):.3f}",
-                    "p90_ms": f"{percentile(values, 0.90):.3f}",
-                    "p95_ms": f"{percentile(values, 0.95):.3f}",
-                    "p99_ms": f"{percentile(values, 0.99):.3f}",
-                    "stddev_ms": f"{statistics.pstdev(values):.3f}" if len(values) > 1 else "0.000",
-                }
-            )
+            row = {key: value for key, value in zip(group_keys, group)}
+            row.update({
+                "metric": metric,
+                "samples": len(values),
+                "min_ms": f"{min(values):.3f}",
+                "max_ms": f"{max(values):.3f}",
+                "avg_ms": f"{statistics.mean(values):.3f}",
+                "p50_ms": f"{percentile(values, 0.50):.3f}",
+                "p90_ms": f"{percentile(values, 0.90):.3f}",
+                "p95_ms": f"{percentile(values, 0.95):.3f}",
+                "p99_ms": f"{percentile(values, 0.99):.3f}",
+                "stddev_ms": f"{statistics.pstdev(values):.3f}" if len(values) > 1 else "0.000",
+            })
+            summary_rows.append(row)
     write_csv(
         output_dir / "ue_latency_summary.csv",
-        ["scenario", "metric", "samples", "min_ms", "max_ms", "avg_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "stddev_ms"],
+        group_keys + ["metric", "samples", "min_ms", "max_ms", "avg_ms", "p50_ms", "p90_ms", "p95_ms", "p99_ms", "stddev_ms"],
         summary_rows,
     )
 
@@ -288,18 +316,17 @@ def main() -> None:
         if key.endswith("_ms") and key not in total_metric_names
     ] if merged_rows else []
     stage_summary_rows: list[dict[str, object]] = []
-    for scenario in scenario_groups:
-        scenario_rows = [row for row in merged_rows if row["scenario"] == scenario]
+    for group in groups:
+        scenario_rows = [row for row in merged_rows if tuple(row[key] for key in group_keys) == group]
         for metric in stage_metric_names + total_metric_names:
             values = [float(row[metric]) for row in scenario_rows]
-            stage_summary_rows.append(
-                {
-                    "scenario": scenario,
-                    "stage": metric,
-                    "avg_ms": f"{statistics.mean(values):.3f}",
-                }
-            )
-    write_csv(output_dir / "ue_latency_stage_summary.csv", ["scenario", "stage", "avg_ms"], stage_summary_rows)
+            row = {key: value for key, value in zip(group_keys, group)}
+            row.update({
+                "stage": metric,
+                "avg_ms": f"{statistics.mean(values):.3f}",
+            })
+            stage_summary_rows.append(row)
+    write_csv(output_dir / "ue_latency_stage_summary.csv", group_keys + ["stage", "avg_ms"], stage_summary_rows)
 
     summary_json = {
         "requests": merged_rows,

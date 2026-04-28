@@ -21,13 +21,13 @@ type Info struct {
 }
 
 type Configuration struct {
-	DsmfName         string          `yaml:"dsmfName"`
-	Sbi              Sbi             `yaml:"sbi"`
-	Grpc             Grpc            `yaml:"grpc"`
-	DpfEndpoints     []EndpointRef   `yaml:"dpfEndpoints"`
-	DsfEndpoints     []EndpointRef   `yaml:"dsfEndpoints"`
-	DefaultProtocols ProtocolConfig  `yaml:"defaultProtocols"`
-	Task             TaskConfig      `yaml:"task"`
+	DsmfName         string         `yaml:"dsmfName"`
+	Sbi              Sbi            `yaml:"sbi"`
+	Grpc             Grpc           `yaml:"grpc"`
+	DpfEndpoints     []EndpointRef  `yaml:"dpfEndpoints"`
+	DsfEndpoints     []EndpointRef  `yaml:"dsfEndpoints"`
+	DefaultProtocols ProtocolConfig `yaml:"defaultProtocols"`
+	Task             TaskConfig     `yaml:"task"`
 }
 
 type Sbi struct {
@@ -43,8 +43,10 @@ type Grpc struct {
 }
 
 type EndpointRef struct {
-	ID      string `yaml:"id"`
-	Address string `yaml:"address"`
+	ID           string `yaml:"id"`
+	Address      string `yaml:"address"`
+	HTTP3Address string `yaml:"http3Address"`
+	QUICAddress  string `yaml:"quicAddress"`
 }
 
 type ProtocolConfig struct {

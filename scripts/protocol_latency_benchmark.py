@@ -5,7 +5,6 @@ import csv
 import hashlib
 import json
 import math
-import os
 import pathlib
 import statistics
 import time
@@ -16,6 +15,8 @@ import urllib.request
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DEFAULT_BASE_URL = "http://127.0.0.31:8010/ndsmf-data-service/v1/tasks"
 DEFAULT_SOURCE_PATH = pathlib.Path("/tmp/data-framework-test/source.json")
+DEFAULT_TRANSPORT_PROTOCOLS = ("HTTP2", "HTTP3", "QUIC")
+DEFAULT_PAYLOAD_PROTOCOLS = ("JSON", "PROTOBUF")
 
 
 def percentile(values, pct):
@@ -45,14 +46,23 @@ def resolve_result_path(result_uri):
     return REPO_ROOT / candidate
 
 
-def build_request(protocol, source_path, sequence, task_timeout_seconds):
+def parse_protocol_list(raw):
+    return tuple(item.strip().upper() for item in raw.split(",") if item.strip())
+
+
+def protocol_label(transport_protocol, payload_protocol):
+    return f"{transport_protocol}/{payload_protocol}"
+
+
+def build_request(transport_protocol, payload_protocol, source_path, sequence, task_timeout_seconds):
+    label = protocol_label(transport_protocol, payload_protocol)
     return {
-        "requestId": f"benchmark-{protocol.lower()}-{sequence}-{time.time_ns()}",
+        "requestId": f"benchmark-{transport_protocol.lower()}-{payload_protocol.lower()}-{sequence}-{time.time_ns()}",
         "resultMode": "sync",
-        "transportProtocol": "HTTP2",
-        "payloadProtocol": protocol,
+        "transportProtocol": transport_protocol,
+        "payloadProtocol": payload_protocol,
         "dataSource": {
-            "sourceId": f"benchmark-source-{protocol.lower()}",
+            "sourceId": f"benchmark-source-{transport_protocol.lower()}-{payload_protocol.lower()}",
             "sourceCategory": "SENSING_CSI",
             "sourceScenario": "BREATHING_CSI",
             "sourceTypeDetail": "latency-benchmark-json-file",
@@ -68,7 +78,9 @@ def build_request(protocol, source_path, sequence, task_timeout_seconds):
                 "version": "v1",
                 "parameters": [
                     {"key": "extract", "value": "all"},
-                    {"key": "protocol", "value": protocol.lower()},
+                    {"key": "transport_protocol", "value": transport_protocol.lower()},
+                    {"key": "payload_protocol", "value": payload_protocol.lower()},
+                    {"key": "protocol", "value": label.lower()},
                     {"key": "mode", "value": "latency-benchmark"},
                 ],
             }
@@ -77,7 +89,9 @@ def build_request(protocol, source_path, sequence, task_timeout_seconds):
         "taskTimeoutSeconds": task_timeout_seconds,
         "labels": {
             "test": "latency-distribution",
-            "payload": protocol.lower(),
+            "transport": transport_protocol.lower(),
+            "payload": payload_protocol.lower(),
+            "protocol": label.lower(),
         },
     }
 
@@ -105,6 +119,8 @@ def issue_request(base_url, payload):
 def raw_fieldnames():
     return [
         "protocol",
+        "transport_protocol",
+        "payload_protocol",
         "phase",
         "sequence",
         "request_id",
@@ -126,6 +142,8 @@ def raw_fieldnames():
 def summary_fieldnames():
     return [
         "protocol",
+        "transport_protocol",
+        "payload_protocol",
         "measured_requests",
         "successful_requests",
         "failed_requests",
@@ -141,13 +159,15 @@ def summary_fieldnames():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Benchmark JSON vs PROTOBUF latency distribution for DSMF tasks")
+    parser = argparse.ArgumentParser(description="Benchmark transport and payload protocol latency distribution for DSMF tasks")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--iterations", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--task-timeout-seconds", type=int, default=60)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--source-path", default=str(DEFAULT_SOURCE_PATH))
+    parser.add_argument("--transport-protocols", default=",".join(DEFAULT_TRANSPORT_PROTOCOLS))
+    parser.add_argument("--payload-protocols", default=",".join(DEFAULT_PAYLOAD_PROTOCOLS))
     args = parser.parse_args()
 
     output_dir = pathlib.Path(args.output_dir)
@@ -171,69 +191,82 @@ def main():
     raw_rows = []
     summary_rows = []
 
-    for protocol in ("JSON", "PROTOBUF"):
-        measured_latencies = []
-        failures = 0
-        sequence = 0
+    transport_protocols = parse_protocol_list(args.transport_protocols)
+    payload_protocols = parse_protocol_list(args.payload_protocols)
+    if not transport_protocols:
+        raise SystemExit("at least one transport protocol is required")
+    if not payload_protocols:
+        raise SystemExit("at least one payload protocol is required")
 
-        for phase, total in (("warmup", args.warmup), ("measure", args.iterations)):
-            for _ in range(total):
-                sequence += 1
-                payload = build_request(protocol, source_path, sequence, args.task_timeout_seconds)
-                status, body, latency_ms = issue_request(args.base_url, payload)
-                task = body.get("task", body)
-                result_uri = task.get("resultUri", "")
-                result_path = resolve_result_path(result_uri) if result_uri else None
-                result_exists = bool(result_path and result_path.exists())
-                result_size = result_path.stat().st_size if result_exists else 0
-                result_sha256 = ""
-                if result_exists:
-                    result_sha256 = hashlib.sha256(result_path.read_bytes()).hexdigest()
+    for transport_protocol in transport_protocols:
+        for payload_protocol in payload_protocols:
+            label = protocol_label(transport_protocol, payload_protocol)
+            measured_latencies = []
+            failures = 0
+            sequence = 0
 
-                row = {
-                    "protocol": protocol,
-                    "phase": phase,
-                    "sequence": sequence,
-                    "request_id": payload["requestId"],
-                    "http_status": status,
-                    "latency_ms": f"{latency_ms:.3f}",
-                    "task_id": task.get("taskId", ""),
-                    "orchestration_id": task.get("orchestrationId", ""),
-                    "state": task.get("state", ""),
-                    "processing_state": task.get("processingState", ""),
-                    "storage_state": task.get("storageState", ""),
-                    "result_uri": result_uri,
-                    "result_exists": str(result_exists).lower(),
-                    "result_size_bytes": result_size,
-                    "result_sha256": result_sha256,
-                    "error": body.get("error", ""),
+            for phase, total in (("warmup", args.warmup), ("measure", args.iterations)):
+                for _ in range(total):
+                    sequence += 1
+                    payload = build_request(transport_protocol, payload_protocol, source_path, sequence, args.task_timeout_seconds)
+                    status, body, latency_ms = issue_request(args.base_url, payload)
+                    task = body.get("task", body)
+                    result_uri = task.get("resultUri", "")
+                    result_path = resolve_result_path(result_uri) if result_uri else None
+                    result_exists = bool(result_path and result_path.exists())
+                    result_size = result_path.stat().st_size if result_exists else 0
+                    result_sha256 = ""
+                    if result_exists:
+                        result_sha256 = hashlib.sha256(result_path.read_bytes()).hexdigest()
+
+                    row = {
+                        "protocol": label,
+                        "transport_protocol": transport_protocol,
+                        "payload_protocol": payload_protocol,
+                        "phase": phase,
+                        "sequence": sequence,
+                        "request_id": payload["requestId"],
+                        "http_status": status,
+                        "latency_ms": f"{latency_ms:.3f}",
+                        "task_id": task.get("taskId", ""),
+                        "orchestration_id": task.get("orchestrationId", ""),
+                        "state": task.get("state", ""),
+                        "processing_state": task.get("processingState", ""),
+                        "storage_state": task.get("storageState", ""),
+                        "result_uri": result_uri,
+                        "result_exists": str(result_exists).lower(),
+                        "result_size_bytes": result_size,
+                        "result_sha256": result_sha256,
+                        "error": body.get("error", ""),
+                    }
+                    raw_rows.append(row)
+
+                    if phase != "measure":
+                        continue
+
+                    if status == 200 and task.get("state") == "COMPLETED":
+                        measured_latencies.append(latency_ms)
+                    else:
+                        failures += 1
+
+            summary_rows.append(
+                {
+                    "protocol": label,
+                    "transport_protocol": transport_protocol,
+                    "payload_protocol": payload_protocol,
+                    "measured_requests": args.iterations,
+                    "successful_requests": len(measured_latencies),
+                    "failed_requests": failures,
+                    "min_ms": f"{min(measured_latencies):.3f}" if measured_latencies else "",
+                    "max_ms": f"{max(measured_latencies):.3f}" if measured_latencies else "",
+                    "avg_ms": f"{statistics.mean(measured_latencies):.3f}" if measured_latencies else "",
+                    "p50_ms": f"{percentile(measured_latencies, 0.50):.3f}" if measured_latencies else "",
+                    "p90_ms": f"{percentile(measured_latencies, 0.90):.3f}" if measured_latencies else "",
+                    "p95_ms": f"{percentile(measured_latencies, 0.95):.3f}" if measured_latencies else "",
+                    "p99_ms": f"{percentile(measured_latencies, 0.99):.3f}" if measured_latencies else "",
+                    "stddev_ms": f"{statistics.pstdev(measured_latencies):.3f}" if measured_latencies else "",
                 }
-                raw_rows.append(row)
-
-                if phase != "measure":
-                    continue
-
-                if status == 200 and task.get("state") == "COMPLETED":
-                    measured_latencies.append(latency_ms)
-                else:
-                    failures += 1
-
-        summary_rows.append(
-            {
-                "protocol": protocol,
-                "measured_requests": args.iterations,
-                "successful_requests": len(measured_latencies),
-                "failed_requests": failures,
-                "min_ms": f"{min(measured_latencies):.3f}" if measured_latencies else "",
-                "max_ms": f"{max(measured_latencies):.3f}" if measured_latencies else "",
-                "avg_ms": f"{statistics.mean(measured_latencies):.3f}" if measured_latencies else "",
-                "p50_ms": f"{percentile(measured_latencies, 0.50):.3f}" if measured_latencies else "",
-                "p90_ms": f"{percentile(measured_latencies, 0.90):.3f}" if measured_latencies else "",
-                "p95_ms": f"{percentile(measured_latencies, 0.95):.3f}" if measured_latencies else "",
-                "p99_ms": f"{percentile(measured_latencies, 0.99):.3f}" if measured_latencies else "",
-                "stddev_ms": f"{statistics.pstdev(measured_latencies):.3f}" if measured_latencies else "",
-            }
-        )
+            )
 
     raw_csv = output_dir / "protocol_latency_raw.csv"
     with raw_csv.open("w", newline="", encoding="utf-8") as handle:

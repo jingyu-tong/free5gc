@@ -14,7 +14,11 @@ UPF_CONFIG_PATH="${UPF_CONFIG_PATH:-./config/upfcfg.yaml}"
 PID_LIST=()
 echo $$ > run.pid
 
-sudo -v # cache credentials
+if [ "${FREE5GC_SUDO_PASSWORD:-}" != "" ]; then
+    printf '%s\n' "${FREE5GC_SUDO_PASSWORD}" | sudo -S -v >/dev/null 2>&1 # cache credentials
+else
+    sudo -v # cache credentials
+fi
 if [ $? == 1 ] # check if credentials were successfully cached
 then
     echo "[ERRO] Without root permission, you cannot run free5GC"

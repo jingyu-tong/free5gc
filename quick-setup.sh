@@ -77,6 +77,10 @@ network_config() {
     sudo systemctl disable ufw
 
     sudo sysctl -w net.ipv4.ip_forward=1
+    sudo sysctl -w net.core.rmem_max=33554432
+    sudo sysctl -w net.core.wmem_max=33554432
+    sudo sysctl -w net.core.rmem_default=33554432
+    sudo sysctl -w net.core.wmem_default=33554432
     sudo iptables -t nat -A POSTROUTING -o ${NETWORK_INTERFACE} -j MASQUERADE
     sudo iptables -I FORWARD 1 -j ACCEPT
 

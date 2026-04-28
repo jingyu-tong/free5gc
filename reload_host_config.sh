@@ -92,6 +92,12 @@ else
     echo -n "[INFO] Setting kernel net.ipv4.ip_forward flag... "
     sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
     echo "[OK]"
+    echo -n "[INFO] Increasing UDP buffers for QUIC/HTTP3... "
+    sudo sysctl -w net.core.rmem_max=33554432 >/dev/null
+    sudo sysctl -w net.core.wmem_max=33554432 >/dev/null
+    sudo sysctl -w net.core.rmem_default=33554432 >/dev/null
+    sudo sysctl -w net.core.wmem_default=33554432 >/dev/null
+    echo "[OK]"
     echo -n "[INFO] Stopping ufw firewall... "
     sudo systemctl stop ufw
     echo "[OK]"

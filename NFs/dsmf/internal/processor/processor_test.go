@@ -19,7 +19,7 @@ func TestCreateTaskRejectsUnsupportedTransport(t *testing.T) {
 			},
 			DpfEndpoints: []factory.EndpointRef{{ID: "dpf-1", Address: "127.0.0.1:50071"}},
 			DsfEndpoints: []factory.EndpointRef{{ID: "dsf-1", Address: "127.0.0.1:50072"}},
-			Task: factory.TaskConfig{TimeoutSeconds: 1},
+			Task:         factory.TaskConfig{TimeoutSeconds: 1},
 		},
 	}
 	ctx := dsmf_context.New(cfg)
@@ -27,7 +27,7 @@ func TestCreateTaskRejectsUnsupportedTransport(t *testing.T) {
 
 	_, status, err := proc.CreateTask(Request{
 		ResultMode:        "async",
-		TransportProtocol: api.ProtocolTypeQUIC,
+		TransportProtocol: api.ProtocolTypeRDMA,
 		PayloadProtocol:   api.ProtocolTypeJSON,
 	})
 	if err == nil {
@@ -47,6 +47,7 @@ func TestReportStorageStatusCompletesTask(t *testing.T) {
 		view: TaskView{
 			TaskID:          "task-1",
 			StorageTaskID:   "store-1",
+			ProcessingState: api.ProcessingStateCompleted,
 			UpdatedAt:       time.Now().UTC(),
 		},
 		done: make(chan struct{}),

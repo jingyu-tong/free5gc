@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package net.framework.result_payload.v1;
+
+option go_package = "github.com/free5gc/dataapi/pkg/api";
+
+message ResultParameter {
+  string key = 1;
+  string value = 2;
+}
+
+message BreathingCsiResult {
+  string mode = 1;
+  double estimated_rate_bpm = 2;
+  double confidence = 3;
+  bool pipeline_validated = 4;
+}
+
+message GestureRecognitionResult {
+  string mode = 1;
+  string gesture_label = 2;
+  double confidence = 3;
+  uint64 csi_time_steps = 4;
+}
+
+message PositioningResult {
+  string mode = 1;
+  double x_meters = 2;
+  double y_meters = 3;
+  double confidence = 4;
+  uint64 csi_time_steps = 5;
+}
+
+message VehicleResult {
+  string mode = 1;
+  string mobility_state = 2;
+  double speed_mps = 3;
+  double confidence = 4;
+  uint64 csi_time_steps = 5;
+}
+
+message ProcessingResult {
+  string task_id = 1;
+  string request_id = 2;
+  string source_id = 3;
+  string source_category = 4;
+  string source_scenario = 5;
+  string output_schema = 6;
+  repeated string steps_applied = 7;
+  uint64 source_bytes = 8;
+  string content_preview = 9;
+  repeated ResultParameter parameters = 10;
+  string processed_by = 11;
+  string processed_at = 12;
+  BreathingCsiResult breathing_csi = 13;
+  GestureRecognitionResult gesture_recognition = 14;
+  PositioningResult positioning = 15;
+  VehicleResult vehicle = 16;
+}

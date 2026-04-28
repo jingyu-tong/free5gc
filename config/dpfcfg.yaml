@@ -7,8 +7,27 @@ configuration:
   grpc:
     bindingIPv4: 127.0.0.32
     port: 50071
+  ranIngress:
+    enable: true
+    bindingIPv4: 127.0.0.32
+    port: 8071
+    http3:
+      enable: true
+      bindingIPv4: 127.0.0.32
+      port: 8072
+    quic:
+      enable: true
+      bindingIPv4: 127.0.0.32
+      port: 8073
+    tls:
+      certFile: ./cert/nrf.pem
+      keyFile: ./cert/nrf.key
+    maxBodyBytes: 16777216
   chunkSize: 32768
   httpSourceTimeoutSeconds: 15
+  httpSourceRetry:
+    maxAttempts: 50
+    intervalMillis: 200
 
 logger:
   enable: true

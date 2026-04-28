@@ -7,6 +7,18 @@ configuration:
   grpc:
     bindingIPv4: 127.0.0.33
     port: 50072
+  dataPlane:
+    http3:
+      enable: true
+      bindingIPv4: 127.0.0.33
+      port: 50073
+    quic:
+      enable: true
+      bindingIPv4: 127.0.0.33
+      port: 50074
+    tls:
+      certFile: ./cert/nrf.pem
+      keyFile: ./cert/nrf.key
   storage:
     rootDir: ./data/dsf
 

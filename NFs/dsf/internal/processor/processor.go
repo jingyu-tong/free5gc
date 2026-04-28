@@ -28,15 +28,15 @@ type storageTask struct {
 }
 
 type transferSession struct {
-	taskID            string
-	sessionID         string
-	filePath          string
-	file              *os.File
-	buffer            []byte
-	receivedChunks    uint64
-	receivedBytes     uint64
-	payloadProtocol   api.ProtocolType
-	transferState     api.TransferState
+	taskID          string
+	sessionID       string
+	filePath        string
+	file            *os.File
+	buffer          []byte
+	receivedChunks  uint64
+	receivedBytes   uint64
+	payloadProtocol api.ProtocolType
+	transferState   api.TransferState
 }
 
 type Processor struct {
@@ -97,7 +97,7 @@ func (p *Processor) OpenTransfer(ctx context.Context, req *api.OpenTransferReque
 			Reason:            "storage task not found",
 		}, nil
 	}
-	if req.TransportProtocol != api.ProtocolTypeHTTP2 {
+	if !isSupportedTransportProfile(req.TransportProtocol) {
 		return &api.OpenTransferResponse{
 			Accepted:          false,
 			TransferSessionID: req.TransferSessionID,
@@ -153,10 +153,11 @@ func (p *Processor) OpenTransfer(ctx context.Context, req *api.OpenTransferReque
 	p.mu.Unlock()
 
 	logger.StoreLog.WithFields(map[string]any{
-		"storage_task_id":    task.request.TaskID,
-		"orchestration_id":   req.OrchestrationID,
+		"storage_task_id":     task.request.TaskID,
+		"orchestration_id":    req.OrchestrationID,
 		"transfer_session_id": req.TransferSessionID,
-		"payload_protocol":   req.PayloadProtocol,
+		"transport_protocol":  req.TransportProtocol,
+		"payload_protocol":    req.PayloadProtocol,
 	}).Infof("DSF_OPEN_TRANSFER_ACCEPTED")
 
 	go p.reportStatus(task.request, api.StorageStateReceiving, "transfer session opened", api.StorageResultLocation{}, "", "")
@@ -166,6 +167,56 @@ func (p *Processor) OpenTransfer(ctx context.Context, req *api.OpenTransferReque
 		TransferSessionID: req.TransferSessionID,
 		State:             api.TransferStateOpen,
 	}, nil
+}
+
+func isSupportedTransportProfile(protocol api.ProtocolType) bool {
+	switch protocol {
+	case api.ProtocolTypeHTTP2, api.ProtocolTypeHTTP3, api.ProtocolTypeQUIC:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Processor) StoreNativePayload(ctx context.Context, sessionID string, body io.Reader) (*api.CloseTransferResponse, error) {
+	p.mu.RLock()
+	session := p.sessions[sessionID]
+	p.mu.RUnlock()
+	if session == nil {
+		return &api.CloseTransferResponse{
+			TransferSessionID: sessionID,
+			State:             api.TransferStateFailed,
+			Message:           "transfer session not found",
+		}, nil
+	}
+
+	buffer := make([]byte, 32*1024)
+	for {
+		n, err := body.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			if _, writeErr := session.file.Write(chunk); writeErr != nil {
+				return nil, writeErr
+			}
+			session.buffer = append(session.buffer, chunk...)
+			session.receivedChunks++
+			session.receivedBytes += uint64(n)
+			session.transferState = api.TransferStateReceiving
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+
+	return p.closeSession(session, "", "")
 }
 
 func (p *Processor) PushResult(stream api.ResultTransferService_PushResultServer) error {
@@ -219,9 +270,19 @@ func (p *Processor) CloseTransfer(ctx context.Context, req *api.CloseTransferReq
 		}, nil
 	}
 
+	return p.closeSession(session, req.OrchestrationID, req.TransferSessionID)
+}
+
+func (p *Processor) closeSession(session *transferSession, orchestrationID, transferSessionID string) (*api.CloseTransferResponse, error) {
+	if transferSessionID == "" {
+		transferSessionID = session.sessionID
+	}
 	sum := sha256.Sum256(session.buffer)
-	if err := session.file.Close(); err != nil {
-		return nil, err
+	if session.file != nil {
+		if err := session.file.Close(); err != nil {
+			return nil, err
+		}
+		session.file = nil
 	}
 	session.transferState = api.TransferStateCompleted
 
@@ -229,6 +290,9 @@ func (p *Processor) CloseTransfer(ctx context.Context, req *api.CloseTransferReq
 	task := p.tasks[session.taskID]
 	p.mu.RUnlock()
 	if task != nil {
+		if orchestrationID == "" {
+			orchestrationID = task.request.OrchestrationID
+		}
 		location := api.StorageResultLocation{
 			ResultURI:   "file://" + session.filePath,
 			ResultID:    uuid.NewString(),
@@ -236,19 +300,19 @@ func (p *Processor) CloseTransfer(ctx context.Context, req *api.CloseTransferReq
 			StoredBytes: session.receivedBytes,
 		}
 		logger.StoreLog.WithFields(map[string]any{
-			"storage_task_id":    task.request.TaskID,
-			"orchestration_id":   req.OrchestrationID,
-			"transfer_session_id": req.TransferSessionID,
-			"stored_bytes":       session.receivedBytes,
-			"result_uri":         location.ResultURI,
+			"storage_task_id":     task.request.TaskID,
+			"orchestration_id":    orchestrationID,
+			"transfer_session_id": transferSessionID,
+			"stored_bytes":        session.receivedBytes,
+			"result_uri":          location.ResultURI,
 		}).Infof("DSF_CLOSE_TRANSFER_COMPLETE")
 		go p.reportStatus(task.request, api.StorageStateStored, "result stored", location, "", "")
 	}
 
 	return &api.CloseTransferResponse{
-		TransferSessionID: req.TransferSessionID,
+		TransferSessionID: transferSessionID,
 		State:             api.TransferStateCompleted,
-		StorageTicket:     req.TransferSessionID + ":" + strconv.FormatUint(session.receivedBytes, 10),
+		StorageTicket:     transferSessionID + ":" + strconv.FormatUint(session.receivedBytes, 10),
 		Message:           "stored successfully",
 	}, nil
 }

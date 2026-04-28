@@ -21,14 +21,32 @@ type Info struct {
 }
 
 type Configuration struct {
-	DsfID        string       `yaml:"dsfId"`
-	Grpc         Grpc         `yaml:"grpc"`
-	Storage      Storage      `yaml:"storage"`
+	DsfID     string    `yaml:"dsfId"`
+	Grpc      Grpc      `yaml:"grpc"`
+	DataPlane DataPlane `yaml:"dataPlane"`
+	Storage   Storage   `yaml:"storage"`
 }
 
 type Grpc struct {
 	BindingIPv4 string `yaml:"bindingIPv4"`
 	Port        int    `yaml:"port"`
+}
+
+type DataPlane struct {
+	HTTP3 DataPlaneEndpoint `yaml:"http3"`
+	QUIC  DataPlaneEndpoint `yaml:"quic"`
+	TLS   TLSConfig         `yaml:"tls"`
+}
+
+type DataPlaneEndpoint struct {
+	Enable      bool   `yaml:"enable"`
+	BindingIPv4 string `yaml:"bindingIPv4"`
+	Port        int    `yaml:"port"`
+}
+
+type TLSConfig struct {
+	CertFile string `yaml:"certFile"`
+	KeyFile  string `yaml:"keyFile"`
 }
 
 type Storage struct {
@@ -67,6 +85,24 @@ func (c *Config) setDefaults() {
 	if c.Configuration.Grpc.Port == 0 {
 		c.Configuration.Grpc.Port = 50072
 	}
+	if c.Configuration.DataPlane.HTTP3.BindingIPv4 == "" {
+		c.Configuration.DataPlane.HTTP3.BindingIPv4 = c.Configuration.Grpc.BindingIPv4
+	}
+	if c.Configuration.DataPlane.HTTP3.Port == 0 {
+		c.Configuration.DataPlane.HTTP3.Port = 50073
+	}
+	if c.Configuration.DataPlane.QUIC.BindingIPv4 == "" {
+		c.Configuration.DataPlane.QUIC.BindingIPv4 = c.Configuration.Grpc.BindingIPv4
+	}
+	if c.Configuration.DataPlane.QUIC.Port == 0 {
+		c.Configuration.DataPlane.QUIC.Port = 50074
+	}
+	if c.Configuration.DataPlane.TLS.CertFile == "" {
+		c.Configuration.DataPlane.TLS.CertFile = "./cert/nrf.pem"
+	}
+	if c.Configuration.DataPlane.TLS.KeyFile == "" {
+		c.Configuration.DataPlane.TLS.KeyFile = "./cert/nrf.key"
+	}
 	if c.Configuration.Storage.RootDir == "" {
 		c.Configuration.Storage.RootDir = "./data/dsf"
 	}
@@ -77,4 +113,12 @@ func (c *Config) setDefaults() {
 
 func (c *Config) GRPCAddr() string {
 	return fmt.Sprintf("%s:%d", c.Configuration.Grpc.BindingIPv4, c.Configuration.Grpc.Port)
+}
+
+func (c *Config) HTTP3Addr() string {
+	return fmt.Sprintf("%s:%d", c.Configuration.DataPlane.HTTP3.BindingIPv4, c.Configuration.DataPlane.HTTP3.Port)
+}
+
+func (c *Config) QUICAddr() string {
+	return fmt.Sprintf("%s:%d", c.Configuration.DataPlane.QUIC.BindingIPv4, c.Configuration.DataPlane.QUIC.Port)
 }

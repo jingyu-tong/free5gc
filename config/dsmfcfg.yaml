@@ -18,6 +18,8 @@ configuration:
   dsfEndpoints:
     - id: dsf-1
       address: 127.0.0.33:50072
+      http3Address: 127.0.0.33:50073
+      quicAddress: 127.0.0.33:50074
   defaultProtocols:
     transport: HTTP2
     payload: JSON
